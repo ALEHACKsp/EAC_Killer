@@ -19,19 +19,21 @@ PVOID ZwQuerySystemInfo(SYSTEM_INFORMATION_CLASS InfoClass)
 	} return Buff;
 }
 
-ULONG64 GetDriverBase(const char* DriverName)
+ULONG64 GetDriverBase(const char* DriverName, PULONG DriverVASize)
 {
-	UNREFERENCED_PARAMETER(DriverName);
-	PSYSTEM_MODULE_INFORMATION ModuleList = 
-		(PSYSTEM_MODULE_INFORMATION)ZwQuerySystemInfo(SystemModuleInformation);
+	PSYSTEM_MODULE_INFORMATION ModuleList = (PSYSTEM_MODULE_INFORMATION)
+		ZwQuerySystemInfo(SystemModuleInformation);
 
 	ULONG64 ModuleBase = 0;
-	for (ULONG64 i = 0; i < ModuleList->ulModuleCount; i++)
-	{
-		hp(ModuleList);
+	for (ULONG i = 0; i < ModuleList->ulModuleCount; i++){
+		SYSTEM_MODULE Module = ModuleList->Modules[i];
+		if (!strcmp((char*)&Module.FullPathName[Module.OffsetToFileName], DriverName)) {
+			if (DriverVASize) *DriverVASize = Module.ImageSize;
+			ModuleBase = (ULONG64)Module.ImageBase; break;
+		}
 	}
 
-	//ExFreePool(ModuleList);
+	ExFreePool(ModuleList);
 	return ModuleBase;
 }
 

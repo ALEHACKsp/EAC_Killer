@@ -75,7 +75,6 @@ void DisableBEObjectCallbacks()
 void WorkItem_Mgr(PDEVICE_OBJECT, PVOID)
 {
 	
-	GetDriverBase("disk.sys");
 }
 
 
