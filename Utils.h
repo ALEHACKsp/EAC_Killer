@@ -4,6 +4,10 @@
 #define sp(a) DbgPrint("FACE STR: %s\n\n", (a))
 #define dp(a) DbgPrint("FACE DEC: %d\n\n", (a))
 
+//Thread Funcs
+DWORD64 PsResumeThread;
+DWORD64 PsSuspendThread;
+
 void Sleep(LONG64 MSec) {
 	LARGE_INTEGER Delay; Delay.QuadPart = -MSec * 10000;
 	KeDelayExecutionThread(KernelMode, false, &Delay);
@@ -37,6 +41,49 @@ ULONG64 GetDriverBase(const char* DriverName, PULONG DriverVASize)
 	return ModuleBase;
 }
 
+void ThreadsMgr(const char* DriverName, bool Suspend)
+{
+	ULONG DriverSize; 
+	ULONG64 DriverBase = GetDriverBase(DriverName, &DriverSize);
+	if (!DriverBase || !DriverSize) return;
+
+	PSYSTEM_PROCESS_INFO ProcInfo = (PSYSTEM_PROCESS_INFO)ZwQuerySystemInfo(SystemProcessInformation);
+	for (PSYSTEM_PROCESS_INFO Cur = ProcInfo;;)
+	{
+		if (Cur->UniqueProcessId == (HANDLE)4)
+		{
+			for (ULONG i = 0; i < Cur->NumberOfThreads; i++)
+			{
+				SYSTEM_THREAD_INFORMATION Thread = Cur->Threads[i];
+				if (((ULONG64)Thread.StartAddress > DriverBase) &&
+					((ULONG64)Thread.StartAddress < (DriverBase + DriverSize))) 
+				{
+					PETHREAD ProcThread = nullptr;
+					if (!PsLookupThreadByThreadId(Thread.ClientId.UniqueThread, &ProcThread) && ProcThread)
+					{
+						if (Suspend) {
+							typedef void(__fastcall* KeSuspendThreadFn)(PETHREAD, PVOID);
+							((KeSuspendThreadFn)PsSuspendThread)(ProcThread, nullptr);
+						}
+
+						else {
+							typedef void(__fastcall* KeResumeThreadFn)(PETHREAD);
+							((KeResumeThreadFn)PsResumeThread)(ProcThread);
+						}
+
+						ObDereferenceObject(ProcThread);
+					}
+				}
+			}
+		}
+
+		if (!Cur->NextEntryOffset) break;
+		else Cur = (PSYSTEM_PROCESS_INFO)((PUCHAR)Cur + Cur->NextEntryOffset);
+	}
+
+	ExFreePool(ProcInfo);
+}
+
 HANDLE GetPID(const wchar_t* ProcessName)
 {
 	HANDLE PID = 0;
@@ -56,4 +103,29 @@ HANDLE GetPID(const wchar_t* ProcessName)
 
 	ExFreePool(ProcInfo);
 	return PID;
+}
+
+ULONG64 KPattern(PUCHAR Start, ULONG ImageLen, const UCHAR* Pattern, const char* Mask)
+{
+	//find pattern
+	for (PUCHAR region_it = Start; region_it < (Start + ImageLen); ++region_it)
+	{
+		if (MmIsAddressValid(region_it) && *region_it == *Pattern)
+		{
+			bool found = true;
+			const unsigned char* pattern_it = Pattern, * mask_it = (const UCHAR*)Mask, * memory_it = region_it;
+			for (; *mask_it && (memory_it < (Start + ImageLen)); ++mask_it, ++pattern_it, ++memory_it)
+			{
+				if (*mask_it != 'x') continue;
+				if (!MmIsAddressValid((void*)memory_it) || *memory_it != *pattern_it) {
+					found = false; break;
+				}
+			}
+
+			if (found)
+				return (ULONG64)region_it;
+		}
+	}
+
+	return 0;
 }
